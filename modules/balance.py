@@ -35,19 +35,24 @@ class Balance:
     #       puppeteer: Puppeteerオブジェクト
     # ==========================================================
     def __init__(self, Puppeteer):
-        self._exchange = Puppeteer._exchange  # 取引所オブジェクト(ccxt.bitmex)
+        self._exchange = Puppeteer._exchange  # 取引所オブジェクト
         self._logger = Puppeteer._logger  # logger
         self._config = Puppeteer._config  # 定義ファイル
-        self._ws = Puppeteer._ws  # websocket
-        self._bitmex = Puppeteer._bitmex  # ccxt.bimexラッパーオブジェクト
+        if hasattr(Puppeteer, '_ws'):
+            self._ws = Puppeteer._ws  # websocket
+        else:
+            self._ws = None
+        self._ccxt = Puppeteer._ccxt  # ccxt wrapper object
         self._discord = Puppeteer._discord  # discord
         self._balanceLogger = Puppeteer._balanceLogger  # 資産通知用ロガー
 
-        # websocketも無効で、balanceデータも取る設定でない
+        # neither websocket nor balance true then warn a user
+        '''
         if not self._config["USE_WEBSOCKET"] and not self._config["USE"]["BALANCE"]:
             self._logger.warning(
                 "balance output is None. because [not websocket] and [not use balance]"
             )
+        '''
 
         # ログファイル名
         self._balanceLogName = Puppeteer._balanceLogName  # ログファイル名
@@ -84,15 +89,23 @@ class Balance:
     # デストラクタ
     # ===========================================================
     def __del__(self):
-        self._send_balance_thread.join(timeout=3)  # この値が妥当かどうか検討する
+        self._send_balance_thread.join(timeout=3)
 
     # ==========================================================
     # balanceデータ
     # ==========================================================
     def balance(self):
-        if self._config["USE_WEBSOCKET"]:
+        # if self._config["USE_WEBSOCKET"]:
+        walletBalance=0.0
+        if self._ws is not None:
             # websocket 有効
-            walletBalance = self._ws.funds()["walletBalance"] * 0.00000001
+            if self._ccxt.__class__.__name__ == 'liquid':
+                # add liquid websocket code if needed
+                walletBalance
+            elif self._ccxt.__class__.__name__ == 'bitmex':
+                walletBalance = self._ws.funds()["walletBalance"] * 0.00000001
+            else:
+                walletBalance=0.0
         else:
             # websocket 無効
             balance = (
@@ -100,7 +113,12 @@ class Balance:
                 if self._config["USE"]["BALANCE"] == True
                 else 0
             )
-            walletBalance = balance["info"][0]["walletBalance"] * 0.00000001
+            if self._ccxt.__class__.__name__ == 'liquid':
+                walletBalance = float(balance["info"][0]["balance"])
+            elif self._ccxt.__class__.__name__ == 'bitmex':
+                walletBalance = balance["info"][0]["walletBalance"] * 0.00000001
+            else:
+                walletBalance=0.0
         return walletBalance
 
     # ==========================================================
@@ -190,7 +208,7 @@ class Balance:
                         fileName="logs/" + self._balanceLogName + ".png",
                     )
             except Exception as e:
-                self._logger.error("balance send Exception: {}".format(e))
+                self._logger.error("balance module send Exception: {}".format(e))
 
             # 終了
             end = time.time()

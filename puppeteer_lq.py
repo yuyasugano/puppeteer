@@ -19,19 +19,16 @@ from os.path import splitext, basename
 from datetime import datetime, timedelta, timezone
 import calendar
 
-# bitmexラッパー
-from exchanges.ccxt.bitmex import BitMEX
-
-# websocket
-from exchanges.websocket.inmemorydb_bitmex_websocket import BitMEXWebsocket
+# liquid wrapper
+from exchanges.ccxt.liquid import Liquid
 
 # ==========================================
-# Puppeteer モジュール
+# Puppeteer module
 # ==========================================
-from modules.discord import Discord  # Discordクラス
-from modules.balance import Balance  # Balanceクラス
-from modules.heartbeat import Heartbeat  # Heartbeatクラス
-from modules.candle import Candle  # Candleクラス
+from modules.discord import Discord  # Discord class
+from modules.balance import Balance  # Balance class
+from modules.heartbeat import Heartbeat  # Heartbeat class
+from modules.candle import Candle  # Candle class
 
 # ==========================================
 # python pupeteer <実行ファイルのフルパス> <実行定義JSONファイルのフルパス>
@@ -40,7 +37,7 @@ args = sys.argv
 
 
 # ==========================================
-# 傀儡師
+# Puppeteer class
 # ==========================================
 class Puppeteer:
 
@@ -97,7 +94,7 @@ class Puppeteer:
         # file handlerの生成・追加
         rotating_handler = RotatingFileHandler(
             filename="logs/" + self._balanceLogName + ".log",  # logファイル名
-            maxBytes=100 * 1000 * 1000,  # 100MBを指定
+            maxBytes=10 * 1000 * 1000,  # 10MBを指定
             backupCount=7,  # 7個保持
             encoding="UTF-8",  # UTF-8
         )
@@ -105,7 +102,7 @@ class Puppeteer:
         balanceLogger.addHandler(rotating_handler)
         self._balanceLogger = balanceLogger  # balanceデータ格納ロガー
         # ----------------------------------
-        # 引数チェック
+        # Augment validation
         # ----------------------------------
         if len(args) != 3:
             self._logger.error("argument length != 3")
@@ -115,8 +112,8 @@ class Puppeteer:
         # ----------------------------------
         with open(args[2], "r") as f:
             jsonData = json.load(f)
-            # print(json.dumps(jsonData, sort_keys = True, indent = 4))
             self._config = jsonData
+            # print(json.dumps(jsonData, sort_keys = True, indent = 4))
         # ----------------------------------
         # ログレベルの設定（デフォルトはINFO）
         # ----------------------------------
@@ -130,44 +127,18 @@ class Puppeteer:
             ]:
                 self._logger.setLevel(eval("logging." + self._config["LOG_LEVEL"]))
         # ------------------------------
-        # websocketを使うか
+        # liquid wrapper
         # ------------------------------
-        if "USE_WEBSOCKET" not in self._config:
-            self._config["USE_WEBSOCKET"] = False
-        # ------------------------------
-        # bitmexラッパー
-        # ------------------------------
-        self._ccxt = BitMEX(
-            symbol=self._config["SYMBOL"],  # BTC/USD   注意：XBTUSDではない
+        self._ccxt = Liquid(
+            symbol=self._config["SYMBOL"],
             apiKey=self._config["APIKEY"],
             secret=self._config["SECRET"],
-            logger=self._logger,
-            use_testnet=self._config["USE_TESTNET"],
+            logger=self._logger
         )
         # ------------------------------
         # 取引所オブジェクト
         # ------------------------------
         self._exchange = self._ccxt._exchange
-        # ----------------------------------
-        # websocket
-        # ----------------------------------
-        self._ws = (
-            BitMEXWebsocket(
-                endpoint="wss://www.bitmex.com/realtime"
-                if self._config["USE_TESTNET"] is False
-                else "wss://testnet.bitmex.com/realtime",
-                symbol=self._config["INFO_SYMBOL"],  # XBTUSD
-                api_key=self._config["APIKEY"],
-                api_secret=self._config["SECRET"],
-                logger=self._logger,
-                use_timemark=False,
-            )
-            if self._config["USE_WEBSOCKET"] == True
-            else None
-        )
-        # instrumentメソッドを一度呼び出さないとエラーを吐くので追加(内部的にtickerがこの情報を使用するため)
-        # if self._config['USE_WEBSOCKET'] == True:
-        #    self._ws.instrument()
         # ----------------------------------
         # Discord生成
         # ----------------------------------
@@ -200,49 +171,34 @@ class Puppeteer:
         # ----------------------------------
         # 起動メッセージ
         # ----------------------------------
-        message = "[傀儡師] 起動しました。Puppet={}, Config={}, 対象通貨ペア={}, RUN周期={}(秒)".format(
+        message = "Liquid puppet has been initialized. Puppet={}, Config={}, Currency pair={}, Tick interval={}(sec)".format(
             args[1], args[2], self._config["SYMBOL"], self._config["INTERVAL"]
         )
         self._logger.info(message)
         self._discord.send(message)
 
-
-# ==========================================
-# メイン
-# ==========================================
 if __name__ == "__main__":
-    # ======================================
-    # 起動
-    # ======================================
     def start():
         puppeteer = Puppeteer(args=args)
-        # 資産状況通知
         balance = Balance(puppeteer) if puppeteer._config["USE_SEND_BALANCE"] else None
-        heartbeat = Heartbeat(puppeteer) if puppeteer._config["USE_WEBSOCKET"] else None
         while True:
             try:
                 run(Puppeteer=puppeteer)
             except KeyboardInterrupt:
-                puppeteer._logger.info("[傀儡師] Ctrl-C検出: 処理を終了します")
-                puppeteer._discord.send("[傀儡師] Ctrl-C検出: 処理を終了します")
-                # 注文が存在したらキャンセルする
+                puppeteer._logger.info("Keyboard Interruption detected: Process exited")
+                puppeteer._discord.send("Keyboard Interruption detected: Process exited")
+                # cancel orders if exit
                 if len(puppeteer._ccxt.open_orders()):
                     puppeteer._ccxt.cancel_orders()
-                    puppeteer._logger.info("[傀儡師] Ctrl-C検出: 既出注文をキャンセルしました")
-                    puppeteer._discord.send("[傀儡師] Ctrl-C検出: 既出注文をキャンセルしました")
+                    puppeteer._logger.info("Keyboard Interruption detected: Orders cancelled")
+                    puppeteer._discord.send("Keyboard Interruption detected: Orders cancelled")
                     time.sleep(1)
                 exit()
             except Exception as e:
-                puppeteer._logger.error("[傀儡師] 例外発生[{}]: 処理を再起動します".format(e))
-                puppeteer._discord.send("[傀儡師] 例外発生[{}]: 処理を再起動します".format(e))
-                # websocket再接続
-                if puppeteer._config["USE_WEBSOCKET"]:
-                    puppeteer._ws.reconnect()
+                puppeteer._logger.error("Exception occurred: Restart the process".format(e))
+                puppeteer._discord.send("Exception occurred: Restart the process".format(e))
                 time.sleep(5)
 
-    # ======================================
-    # メインループ
-    # ======================================
     def run(Puppeteer):
         while True:
             # ----------------------------------
@@ -260,7 +216,7 @@ if __name__ == "__main__":
             try:
                 # ------------------------------
                 # ローソク足情報取得
-                #  ローカル関数を使用
+                # ローカル関数を使用
                 # ------------------------------
                 candle = (
                     Puppeteer._ccxt.ohlcv(
@@ -294,7 +250,7 @@ if __name__ == "__main__":
                     if Puppeteer._config["USE"]["BALANCE"] == True
                     else None
                 )
-                # print('BTC={}'.format(balance['BTC']['total']))
+                print('BTC balance: {}'.format(balance['info'][2]['balance']))
                 # ------------------------------
                 # ポジション取得
                 # ------------------------------
@@ -303,7 +259,7 @@ if __name__ == "__main__":
                     if Puppeteer._config["USE"]["POSITION"] == True
                     else None
                 )
-                # print('position={}, avgPrice={}'.format(position[0]['currentQty'], position[0]['avgEntryPrice']))
+                print('position: {}'.format(position['models']))
                 # ------------------------------
                 # ticker取得
                 # ------------------------------
@@ -312,7 +268,7 @@ if __name__ == "__main__":
                     if Puppeteer._config["USE"]["TICKER"] == True
                     else None
                 )
-                # print('last={}'.format(ticker['last']))
+                print('last price: {}'.format(ticker['last']))
                 # ------------------------------
                 # 板情報取得
                 # ------------------------------
@@ -326,11 +282,11 @@ if __name__ == "__main__":
                     if Puppeteer._config["USE"]["ORDERBOOK"] == True
                     else None
                 )
-                # print('bid={}, ask={}'.format(orderbook['bids'][0][0], orderbook['asks'][0][0]))
+                print('bid: {}, ask: {}'.format(orderbook['bids'][0][0], orderbook['asks'][0][0]))
             except Exception as e:
-                # bitmexオブジェクトの実行で例外が発生したが、再起動はしないで処理を継続する
+                # liquidオブジェクトの実行で例外が発生したが、再起動はしないで処理を継続する
                 Puppeteer._logger.error(
-                    "Puppeteer.run() bitmex Exception: {}".format(e)
+                    "Puppeteer.run() liquid Exception: {}".format(e)
                 )
                 # 処理時間がINTERVALよりも長かったらワーニングを出す
                 elapsed_time = time.time() - start
@@ -340,13 +296,7 @@ if __name__ == "__main__":
                             elapsed_time, Puppeteer._config["INTERVAL"]
                         )
                     )
-                # 処理をすぐに継続する
                 continue
-            # ----------------------------------
-            # websocketを使っていた場合、force_exitフラグのチェック
-            # ----------------------------------
-            if Puppeteer._config["USE_WEBSOCKET"] and Puppeteer._ws.is_force_exit():
-                raise Exception("websocket force exit")
             # ----------------------------------
             # ストラテジ呼び出し
             # ----------------------------------
@@ -359,17 +309,14 @@ if __name__ == "__main__":
             # 上記までで消費された秒数だけ差し引いてスリープする
             # ----------------------------------
             interval = Puppeteer._config["INTERVAL"]
-            if interval - elapsed_time > 0:
-                time.sleep(interval - elapsed_time)
+            diff = interval - elapsed_time
+            if diff > 0:
+                time.sleep(diff)
             else:
-                time.sleep(1)  # RUN時間が想定よりも長くかかってしまったため、すぐに次の処理に繊維する。
+                time.sleep(1)
                 Puppeteer._logger.warning(
                     "elapsed_time={} over interval time={}".format(
                         elapsed_time, interval
                     )
                 )
-
-    # ======================================
-    # 実行開始
-    # ======================================
     start()
