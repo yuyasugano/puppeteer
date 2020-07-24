@@ -8,7 +8,7 @@
 - 名称の意味：傀儡師、人形使い、puppeteer、puppet player
 - イメージ：　戦略を裏で操る 傀儡師 をイメージしました。
 - 機能：
-  - 対応している取引所は[bitmex](https://www.bitmex.com/?lang=ja-JP)です。
+  - 対応している取引所は[bitmex](https://www.bitmex.com/?lang=ja-JP)と[liquid](https://www.liquid.com/ja/)です。
   - [TestNet](https://testnet.bitmex.com/?lang=ja-JP)にも対応していますので、実運用前に十分に試験が可能です。
   - 仮想通貨自動売買botを、テンプレートを使うことにより素早く作成することができます。
   - websocketでデータを収集させることも可能です。それにより取引所のREST APIを高速に発行しつづける必要がなくなります。
