@@ -261,7 +261,7 @@ if __name__ == "__main__":
                     if Puppeteer._config["USE"]["POSITION"] == True
                     else None
                 )
-                print('position: {}'.format(position['models']))
+                print('position: {}'.format(position))
                 # ------------------------------
                 # ticker取得
                 # ------------------------------
