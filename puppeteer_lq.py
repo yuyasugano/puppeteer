@@ -193,6 +193,8 @@ if __name__ == "__main__":
                     puppeteer._logger.info("Keyboard Interruption detected: Orders cancelled")
                     puppeteer._discord.send("Keyboard Interruption detected: Orders cancelled")
                     time.sleep(1)
+                else:
+                    print('No open orders, exit the process')
                 exit()
             except Exception as e:
                 puppeteer._logger.error("Exception occurred: Restart the process".format(e))

@@ -61,57 +61,6 @@ class Liquid:
     def floor(self, price):
         return math.floor(price * 2) / 2
 
-    # ==========================================================
-    # 注文更新で使用する orderID, price, leavesQtyを注文から取得
-    #   param:
-    #       order: order
-    #   return:
-    #       orderID, price, leavesQty
-    # ==========================================================
-    def get_amend_params(self, order):
-        orderID = order["id"]
-        price = order["price"]
-        leavesQty = order["info"]["leavesQty"]
-        return orderID, price, leavesQty
-
-    # ==========================================================
-    # 注文削除で使用する orderID を取得する
-    #   param:
-    #       orders: order配列
-    #   return:
-    #       orderID（複数ある場合は 'xxxx,yyyy,zzzz'）
-    # ==========================================================
-    def get_cancel_params(self, orders):
-        orderIDs = ""
-        for o in orders:
-            if orderIDs != "":
-                orderIDs += ","
-            orderIDs += o["id"]
-        return orderIDs
-
-    # ==========================================================
-    # 注文価格配列を order から取得する
-    #   param:
-    #       orders: order配列
-    #   return:
-    #       price list
-    # ==========================================================
-    def get_price_list(self, orders):
-        prices = []
-        for o in orders:
-            prices.append(o["price"])
-        return prices
-
-    # ==========================================================
-    # 指定したclOrdIDを含む注文を検索・取得
-    #   params:
-    #       clOrdID: 'limit_buy', 'limit_sell', 'settle_buy' or 'settle_sell' -> 'settle'だけで決済注文を検索しても良い
-    # ==========================================================
-    def find_orders(self, open_orders, id):
-        return [
-            order for order in open_orders if 0 < order["info"]["client_order_id"].find(id)
-        ]
-
     # ##########################################################
     # ccxt関数ラッパー
     # ##########################################################
@@ -160,7 +109,6 @@ class Liquid:
                 price=price,
                 params={
                     "client_order_id": "{}_limit_{}".format(order_id, side),
-                    # "execInst": "ParticipateDoNotInitiate", Post Only Order
                 },
             )
             self._logger.debug("- limit order={}".format(order))
@@ -201,107 +149,18 @@ class Liquid:
         return order
 
     # ==========================================================
-    # 決済注文（limit）
-    #   param:
-    #       side: buy or sell
-    #       price: 価格
-    #       size: orderロット数
-    #   return:
-    #       order
-    # ==========================================================
-    def limit_settle_order(self, side, price, size):
-
-        order = None
-
-        # 注文に設定する「clOrdID」のID情報を作成・取得
-        order_id = str(time.time() * 1000)
-
-        try:
-            order = self._exchange.create_order(
-                symbol=self._symbol,
-                type="limit",
-                side=side,
-                amount=size,
-                price=price,
-                params={ # Liquid does not support ReduceOnly
-                    "execInst": "ReduceOnly,ParticipateDoNotInitiate",
-                    "clOrdID": "{}_limit_settle_{}".format(order_id, side),
-                },
-            )
-            self._logger.debug("- limit settle order={}".format(order))
-        except Exception as e:
-            self._logger.error("- limit settle order: exception={}".format(e))
-            order = None
-
-        return order
-
-    # ==========================================================
-    # 決済注文（market）
-    #   param:
-    #       side: buy or sell
-    #       size: orderロット数
-    #   return:
-    #       order
-    # ==========================================================
-    def market_settle_order(self, side, size):
-
-        order = None
-
-        # 注文に設定する「clOrdID」のID情報を作成・取得
-        order_id = str(time.time() * 1000)
-
-        try:
-            order = self._exchange.create_order(
-                symbol=self._symbol,
-                type="market",
-                side=side,
-                amount=size,
-                params={ # Liquid does not support ReduceOnly
-                    "execInst": "ReduceOnly",
-                    "clOrdID": "{}_market_settle_{}".format(order_id, side),
-                },
-            )
-            self._logger.debug("- market settle order={}".format(order))
-        except Exception as e:
-            self._logger.error("- market settle order: exception={}".format(e))
-            order = None
-
-        return order
-
-    # ==========================================================
-    # 注文更新
-    #   param:
-    #       options: order情報 (注意：数量を変える場合はorderQtyではなく、leavesQty を使う)
-    #           orderID, price, leavesQty
-    #   return:
-    #       order
-    # ==========================================================
-    def amend_order(self, **options):
-
-        order = None
-
-        try:
-            order = self._exchange.privatePutOrder(options)
-            self._logger.debug("- amend order={}".format(order))
-        except Exception as e:
-            self._logger.error("- amend order: exception={}".format(e))
-            order = None
-
-        return order
-
-    # ==========================================================
     # 注文キャンセル
     #   param:
-    #       options: order情報 (orderID or clOrdID)
+    #       options: order情報 (orderID or client_order_id)
     #   return:
     #       order
     # ==========================================================
-    def cancel_order(self, **options):
+    def cancel_order(self, orderId):
 
         order = None
 
         try:
-            order = self._exchange.privateDeleteOrder(options)
+            order = self._exchange.calcel_order(symbol=self._symbol, id=orderId)
             self._logger.debug("- cancel order={}".format(order))
         except Exception as e:
             self._logger.error("- cancel order: exception={}".format(e))
@@ -321,7 +180,11 @@ class Liquid:
         orders = None
 
         try:
-            orders = self._exchange.privateDeleteOrderAll(options)
+            orders = self._exchange.fetch_open_orders()
+            for i,o in enumerate(orders):
+                if orders[i].get('status') == 'live':
+                    orderId = orders[i].get('id')
+                    self.cancel_order(orderId)
             self._logger.debug("- cancel orders={}".format(orders))
         except Exception as e:
             self._logger.error("- cancel orders: exception={}".format(e))
@@ -338,145 +201,24 @@ class Liquid:
     #   return:
     #       order (注文結果、失敗の場合はNoneが戻される)
     # ==========================================================
-    def stop_order(self, side, size, trigger_price):
+    def stop_order(self, side, price, size):
 
         # 注文に設定する「clOrdID」のID情報を作成・取得
         order_id = str(time.time() * 1000)
 
-        if side.upper() == "BUY":
-            _side = "Buy"
-        else:
-            _side = "Sell"
-
-        order = None
-
         try:
-            order = self._exchange.privatePostOrder(
-                dict(
-                    {
-                        "symbol": Liquid.INFO_SYMBOL,
-                        "side": _side,
-                        "orderQty": size,
-                        "stopPx": trigger_price,
-                        "ordType": "Stop",
-                        "execInst": "ReduceOnly",
-                        "clOrdID": "{}_stop_market".format(order_id),
-                    }
-                )
+            order = self._exchange.create_order(
+                symbol=self._symbol,
+                type="stop",
+                side=side,
+                amount=size,
+                price=price,
+                params={"client_order_id": "{}_market_{}".format(order_id, side)},
             )
-            self._logger.debug("- stop market order={}".format(order))
+            self._logger.debug("- stop order={}".format(order))
         except Exception as e:
-            self._logger.error("- stop market: exception={}".format(e))
+            self._logger.error("- stop order: exception={}".format(e))
             order = None
-
-        return order
-
-    # ==========================================================
-    # ストップ指値注文
-    #   param:
-    #       side: buy or sell
-    #       size:           サイズ （＋：買い、－：売り）
-    #       trigger_price:  トリガー価格
-    #       price:          価格
-    #   return:
-    #       order (注文結果、失敗の場合はNoneが戻される)
-    # ==========================================================
-    def stop_limit_order(self, side, size, trigger_price, price):
-
-        # 注文に設定する「clOrdID」のID情報を作成・取得
-        order_id = str(time.time() * 1000)
-
-        if side.upper() == "BUY":
-            _side = "Buy"
-        else:
-            _side = "Sell"
-
-        order = None
-
-        try:
-            order = self._exchange.privatePostOrder(
-                dict(
-                    {
-                        "symbol": BitMEX.INFO_SYMBOL,
-                        "side": _side,
-                        "orderQty": size,
-                        "stopPx": trigger_price,
-                        "price": price,
-                        "ordType": "StopLimit",
-                        "execInst": "ReduceOnly,ParticipateDoNotInitiate",
-                        "clOrdID": "{}_stop_limit".format(order_id),
-                    }
-                )
-            )
-            self._logger.debug("- stop limit order={}".format(order))
-        except Exception as e:
-            self._logger.error("- stop limit: exception={}".format(e))
-            order = None
-
-        return order
-
-    # ==========================================================
-    # トレーリングストップ注文
-    #   param:
-    #       side: buy or sell
-    #       size:           サイズ （＋：買い、－：売り）
-    #       price_offset:   オフセット価格
-    #   return:
-    #       order (注文結果、失敗の場合はNoneが戻される)
-    # ==========================================================
-    def trailing_stop_order(self, side, size, price_offset):
-
-        # 注文に設定する「clOrdID」のID情報を作成・取得
-        order_id = str(time.time() * 1000)
-
-        if side.upper() == "BUY":
-            _side = "Buy"
-        else:
-            _side = "Sell"
-
-        order = None
-
-        try:
-            order = self._exchange.privatePostOrder(
-                dict(
-                    {
-                        "symbol": Liquid.INFO_SYMBOL,
-                        "side": _side,
-                        "orderQty": size,
-                        "pegOffsetValue": price_offset,
-                        "pegPriceType": "TrailingStopPeg",
-                        "ordType": "Stop",
-                        "execInst": "ReduceOnly",
-                        "clOrdID": "{}_trailing_stop".format(order_id),
-                    }
-                )
-            )
-            self._logger.debug("- trailing stop order={}".format(order))
-        except Exception as e:
-            self._logger.error("- trailing stop: exception={}".format(e))
-            order = None
-
-        return order
-
-    # ==========================================================
-    # bulk order 処理
-    #       params: order情報
-    #   return:
-    #       order (注文結果のリスト、失敗の場合はNoneが戻される)
-    # ==========================================================
-    def bulk_order(self, params):
-
-        # BulkOrder発行
-        orders = None
-
-        try:
-            orders = self._exchange.privatePostOrderBulk({"orders": json.dumps(params)})
-            self._logger.debug("- bulk orders={}".format(orders))
-        except Exception as e:
-            self._logger.error("- bulk orders: exception={}".format(e))
-            orders = None
-
-        return orders
 
     # ======================================
     # balance
@@ -501,6 +243,7 @@ class Liquid:
         _position = None
         try:
             _position = self._exchange.privateGetOrders()
+            _position = _position['models']
             self._logger.debug("- position={}".format(_position))
         except Exception as e:
             self._logger.error("- position: exception={}".format(e))
@@ -516,9 +259,9 @@ class Liquid:
         _ticker = None
         try:
             _ticker = self._exchange.fetch_ticker(symbol=symbol)  # シンボル
-            self._logger.debug("■ ticker={}".format(_ticker))
+            self._logger.debug("- ticker={}".format(_ticker))
         except Exception as e:
-            self._logger.error("■ ticker: exception={}".format(e))
+            self._logger.error("- ticker: exception={}".format(e))
             _ticker = None # Noneを戻す
 
         return _ticker
@@ -533,9 +276,9 @@ class Liquid:
             _orderbook = self._exchange.fetch_order_book(
                 symbol=symbol, limit=limit  # シンボル  # 取得件数(未指定:100、MAX:500)
             )
-            self._logger.debug("■ orderbook={}".format(_orderbook))
+            self._logger.debug("- orderbook={}".format(_orderbook))
         except Exception as e:
-            self._logger.error("■ orderbook: exception={}".format(e))
+            self._logger.error("- orderbook: exception={}".format(e))
             _orderbook = None # Noneを戻す
 
         return _orderbook

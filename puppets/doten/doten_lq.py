@@ -36,6 +36,8 @@ class Puppet:
     # ==========================================================
     def run(self, ticker, orderbook, position, balance, candle):
 
+        self._logger.info('candle: {}'.format(candle))
+
         # ------------------------------------------------------
         # candle in DataFrame object
         # ------------------------------------------------------
@@ -86,7 +88,9 @@ class Puppet:
         diff = 0
         for index, row in df[-range_mean_num:].iterrows():
             diff += row["high"] - row["low"]
-        return diff/range_mean_num
+        ret = diff/range_mean_num
+        print('Range mean of high and low in period: {}'.format(ret))
+        return ret
 
     # ==========================================================
     # ドテン計算
